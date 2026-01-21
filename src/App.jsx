@@ -1,675 +1,475 @@
-import React, { useState, useEffect, useMemo } from 'react';
+// App.jsx - Updated to use GroupDashboard Component
+// แทนที่ไฟล์ src/App.jsx ของคุณด้วยไฟล์นี้
+
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  PlusCircle, 
-  Monitor, 
-  UserCircle, 
-  ChevronRight, 
-  CheckCircle2, 
-  AlertCircle,
-  BarChart3,
-  Calendar,
-  Building2,
-  Users,
-  ExternalLink,
-  ArrowLeft,
-  Save,
-  Send
+  Building2, Users, LayoutDashboard, Search, Filter, 
+  Plus, Send, ArrowLeft, CheckCircle2, Clock, 
+  AlertCircle, Globe2, FileText, X, Save, 
+  ChevronRight, MoreVertical, PieChart, Trash2, PlusCircle, Link2, 
+  Check, Info, Calendar as CalendarIcon, ListFilter, MapPin, ExternalLink,
+  BarChart3, Activity, Layers, Trophy, ArrowUpRight, ClipboardCheck, AlertTriangle,
+  SearchX, CalendarX, Copy, RefreshCcw, ChevronDown, Lock, Wifi, WifiOff
 } from 'lucide-react';
+import { api } from './config/api';
 
-// --- Configuration ---
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwdu-ypXb4-rEtNEwj3Csg7WDpSrjNH9nhJ9SIap1B1PEp7LlDXkpmXoYVonXDQ_U0U/exec";
+// 🎯 IMPORT COMPONENTS
+import ProvincialDashboard from './components/dashboard/ProvincialDashboard';
+import GroupDashboard from './components/dashboard/GroupDashboard';
+import AddReportPage from './components/report/AddReportPage';
+import SubmitReportPage from './components/report/SubmitReportPage';
 
-// --- Mock Data & Types (Structure according to Sheet Spec) ---
-const MOCK_ORGS = Array.from({ length: 19 }, (_, i) => ({ orgId: `D${String(i + 1).padStart(2, '0')}`, name: `อำเภอเมือง ${i + 1}`, type: 'DISTRICT' }));
-MOCK_ORGS.push({ orgId: 'P00', name: 'สำนักงานสาธารณสุขจังหวัด', type: 'PROVINCE' });
+// ==================== CONSTANTS ====================
 
-const MOCK_GROUPS = [
-  { groupId: 'G01', name: 'กลุ่มงานยุทธศาสตร์' },
-  { groupId: 'G02', name: 'กลุ่มงานควบคุมโรค' },
-  { groupId: 'G03', name: 'กลุ่มงานส่งเสริมสุขภาพ' },
-  { groupId: 'G04', name: 'กลุ่มงานทรัพยากรบุคคล' },
+const DISTRICTS = [
+  "เมืองสุราษฎร์ธานี", "กาญจนดิษฐ์", "ดอนสัก", "เกาะสมุย", "เกาะพะงัน", 
+  "ไชยา", "ท่าชนะ", "คีรีรัฐนิคม", "บ้านตาขุน", "พนม", 
+  "ท่าฉาง", "บ้านนาสาร", "บ้านนาเดิม", "เคียนซา", "เวียงสระ", 
+  "พระแสง", "พุนพิน", "ชัยบุรี", "วิภาวดี"
 ];
 
-const MOCK_PERIODS = [
-  { periodId: '202401', name: 'มกราคม 2567', month: 1, year: 2024 },
-  { periodId: '202402', name: 'กุมภาพันธ์ 2567', month: 2, year: 2024 },
-  { periodId: '202403', name: 'มีนาคม 2567', month: 3, year: 2024 },
-  { periodId: '202404', name: 'เมษายน 2567', month: 4, year: 2024 },
-  { periodId: '202405', name: 'พฤษภาคม 2567', month: 5, year: 2024 },
+const GROUPS = [
+  "กลุ่มงานประสานฯ", "กลุ่มงานยุทธศาสตร์ฯ", "กลุ่มงานส่งเสริมฯ", "กลุ่มงานสารสนเทศฯ"
 ];
 
-// --- App State Manager ---
+const MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+const YEARS = ["2569", "2570", "2571"];
 
-const App = () => {
-  const [view, setView] = useState('landing'); // landing, choose-district, choose-group, home, detail, create, monitor, dashboard
-  const [role, setRole] = useState(null); // DISTRICT, GROUP, EXECUTIVE, ADMIN
-  const [currentOrg, setCurrentOrg] = useState(null);
-  const [currentGroup, setCurrentGroup] = useState(null);
-  const [selectedPeriod, setSelectedPeriod] = useState('202403');
-  const [loading, setLoading] = useState(false);
-  const [tasks, setTasks] = useState([]);
-  const [selectedTask, setSelectedTask] = useState(null);
+const INITIAL_TASKS = [];
 
-  /**
-   * Actual GAS API Call
-   * ยิงข้อมูลไปยัง URL ของ Google Apps Script ที่ระบุมา
-   */
-  const apiCall = async (action, payload = {}) => {
-    setLoading(true);
-    try {
-      // ใช้ POST เป็นหลักสำหรับการทำงานกับ GAS Web App 
-      // เนื่องจากจัดการข้อมูล JSON ได้ง่ายกว่า GET ในฝั่ง Apps Script
-      const response = await fetch(GAS_URL, {
-        method: 'POST',
-        mode: 'no-cors', // หากต้องการรับ Response JSON อาจต้องตั้งค่า CORS ใน GAS เพิ่มเติม
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
-        },
-        body: JSON.stringify({ action, payload }),
-      });
+// ==================== ACCESS CONTROL ====================
 
-      // เนื่องจากโหมด no-cors จะเข้าถึง response body ไม่ได้ 
-      // สำหรับ GAS มักจะแนะนำให้ส่งแบบปกติหากตั้งค่า CORS ใน doGet/doPost ไว้แล้ว
-      // ด้านล่างนี้คือรูปแบบปกติสำหรับ Production
-      /*
-      const response = await fetch(GAS_URL, {
-        method: 'POST',
-        body: JSON.stringify({ action, payload }),
-      });
-      const result = await response.json();
-      setLoading(false);
-      return result;
-      */
+const PROVINCE_PIN = '1234';
 
-      setLoading(false);
-      return { success: true }; // สันนิษฐานว่าสำเร็จสำหรับโหมด no-cors
-    } catch (error) {
-      console.error(`API Error (${action}):`, error);
-      setLoading(false);
-      return { success: false, error: error.message };
-    }
+const PERMISSIONS = {
+  PUBLIC: ['landing', 'entry', 'provincial_dashboard'],
+  DISTRICT: ['dashboard', 'task_detail'],
+  PROVINCE: ['group_dashboard', 'monitor', 'task_detail_p2d', 'add_report', 'submit_report', 'track_report']
+};
+
+const canAccessView = (role, view, isPINVerified) => {
+  if (PERMISSIONS.PUBLIC.includes(view)) return true;
+  if (PERMISSIONS.DISTRICT.includes(view)) return role === 'district';
+  if (PERMISSIONS.PROVINCE.includes(view)) return role === 'province' && isPINVerified;
+  return false;
+};
+
+const requiresPIN = (view) => PERMISSIONS.PROVINCE.includes(view);
+
+// ==================== HELPERS ====================
+
+const getProgressColor = (percent) => {
+  if (percent >= 80) return 'text-emerald-500';
+  if (percent >= 50) return 'text-amber-500';
+  return 'text-rose-500';
+};
+
+const getProgressBg = (percent) => {
+  if (percent >= 80) return 'bg-emerald-500';
+  if (percent >= 50) return 'bg-amber-500';
+  return 'bg-rose-500';
+};
+
+const copyToClipboard = (text) => {
+  const el = document.createElement('textarea');
+  el.value = text;
+  document.body.appendChild(el);
+  el.select();
+  document.execCommand('copy');
+  document.body.removeChild(el);
+};
+
+// ==================== COMPONENTS ====================
+
+const Badge = ({ children, color = 'blue' }) => {
+  const colors = {
+    blue: 'bg-blue-100 text-blue-700',
+    emerald: 'bg-emerald-100 text-emerald-700',
+    amber: 'bg-amber-100 text-amber-700',
+    rose: 'bg-rose-100 text-rose-700',
+    slate: 'bg-slate-100 text-slate-700'
   };
+  return <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${colors[color]}`}>{children}</span>;
+};
 
-  // --- UI Components ---
+const PINGate = ({ isOpen, onVerify, onCancel, error }) => {
+  const [pin, setPin] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const Landing = () => (
-    <div className="flex flex-col items-center justify-center min-h-[80vh] p-4 space-y-6">
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold text-slate-800">1-Click Report</h1>
-        <p className="text-slate-500">กรุณาเลือกบทบาทเพื่อเข้าใช้งาน</p>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
-        {[
-          { id: 'DISTRICT', label: 'อำเภอ (District)', icon: Building2, color: 'bg-blue-500' },
-          { id: 'GROUP', label: 'กลุ่มงาน (Academic Group)', icon: Users, color: 'bg-emerald-500' },
-          { id: 'EXECUTIVE', label: 'ผู้บริหาร (Executive)', icon: LayoutDashboard, color: 'bg-purple-500' },
-          { id: 'ADMIN', label: 'ผู้ดูแลระบบ (Admin)', icon: UserCircle, color: 'bg-slate-700' },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => {
-              setRole(item.id);
-              if (item.id === 'DISTRICT') setView('choose-district');
-              else if (item.id === 'GROUP') setView('choose-group');
-              else if (item.id === 'EXECUTIVE') setView('dashboard');
-              else setView('home');
-            }}
-            className="flex items-center p-6 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all group"
-          >
-            <div className={`p-3 rounded-xl ${item.color} text-white mr-4`}>
-              <item.icon size={24} />
-            </div>
-            <div className="text-left">
-              <div className="font-semibold text-slate-800">{item.label}</div>
-              <div className="text-xs text-slate-400 font-normal">คลิกเพื่อดำเนินการต่อ</div>
-            </div>
-            <ChevronRight className="ml-auto text-slate-300 group-hover:text-slate-500 transition-colors" />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+  if (!isOpen) return null;
 
-  const ChooseDistrict = () => (
-    <div className="p-4 max-w-4xl mx-auto space-y-6">
-      <button onClick={() => setView('landing')} className="flex items-center text-slate-500 hover:text-slate-800">
-        <ArrowLeft size={18} className="mr-1" /> กลับ
-      </button>
-      <h2 className="text-2xl font-bold text-slate-800">เลือกอำเภอของท่าน</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {MOCK_ORGS.filter(o => o.type === 'DISTRICT').map(org => (
-          <button
-            key={org.orgId}
-            onClick={() => { setCurrentOrg(org); setView('home'); }}
-            className="p-4 text-center bg-white border border-slate-200 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-colors"
-          >
-            <div className="text-sm font-medium text-slate-700">{org.name}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  const ChooseGroup = () => (
-    <div className="p-4 max-w-4xl mx-auto space-y-6">
-      <button onClick={() => setView('landing')} className="flex items-center text-slate-500 hover:text-slate-800">
-        <ArrowLeft size={18} className="mr-1" /> กลับ
-      </button>
-      <h2 className="text-2xl font-bold text-slate-800">เลือกกลุ่มงานของท่าน</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {MOCK_GROUPS.map(group => (
-          <button
-            key={group.groupId}
-            onClick={() => { setCurrentGroup(group); setView('home'); }}
-            className="p-5 flex items-center bg-white border border-slate-200 rounded-xl hover:bg-emerald-50 hover:border-emerald-200 transition-colors"
-          >
-            <Users className="text-emerald-500 mr-4" />
-            <div className="font-medium text-slate-700">{group.name}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  const DistrictHome = () => (
-    <div className="p-4 max-w-4xl mx-auto space-y-6 pb-20">
-      <header className="flex justify-between items-start">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">{currentOrg?.name}</h2>
-          <p className="text-slate-500 text-sm">รายการงานส่งรายงาน</p>
-        </div>
-        <select 
-          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none ring-2 ring-transparent focus:ring-blue-500/20"
-          value={selectedPeriod}
-          onChange={(e) => setSelectedPeriod(e.target.value)}
-        >
-          {MOCK_PERIODS.map(p => <option key={p.periodId} value={p.periodId}>{p.name}</option>)}
-        </select>
-      </header>
-
-      <div className="space-y-3">
-        {/* Sample Task List */}
-        {[
-          { id: 'T001', title: 'รายงานความครอบคลุมวัคซีน', group: 'กลุ่มงานควบคุมโรค', status: 'PENDING', due: '15/03/2567' },
-          { id: 'T002', title: 'รายงานสถานะการเงินกองทุน', group: 'กลุ่มงานยุทธศาสตร์', status: 'SUBMITTED', due: '10/03/2567' },
-          { id: 'T003', title: 'รายงานความก้าวหน้าโครงการวิจัย', group: 'กลุ่มงานส่งเสริมสุขภาพ', status: 'LATE', due: '05/03/2567' },
-        ].map(task => (
-          <button
-            key={task.id}
-            onClick={() => { setSelectedTask(task); setView('detail'); }}
-            className="w-full flex items-center p-4 bg-white border border-slate-200 rounded-2xl hover:border-blue-300 transition-all text-left group"
-          >
-            <div className="flex-1">
-              <div className="flex items-center space-x-2 mb-1">
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                  task.status === 'PENDING' ? 'bg-amber-100 text-amber-600' :
-                  task.status === 'SUBMITTED' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'
-                }`}>
-                  {task.status}
-                </span>
-                <span className="text-xs text-slate-400">Due: {task.due}</span>
-              </div>
-              <h3 className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{task.title}</h3>
-              <p className="text-xs text-slate-400">{task.group}</p>
-            </div>
-            <ChevronRight className="text-slate-300 group-hover:text-blue-500" />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  const TaskDetail = () => {
-    const [note, setNote] = useState('');
-    const [link, setLink] = useState('');
-
-    const handleSubmit = async () => {
-      await apiCall('CONFIRM_TASK', { taskId: selectedTask.id, note, evidenceLink: link, orgId: currentOrg?.orgId });
-      setView('home');
-    };
-
-    return (
-      <div className="p-4 max-w-2xl mx-auto space-y-6">
-        <button onClick={() => setView('home')} className="flex items-center text-slate-500 hover:text-slate-800">
-          <ArrowLeft size={18} className="mr-1" /> กลับ
-        </button>
-        <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-            <h2 className="text-xl font-bold text-slate-800">{selectedTask?.title}</h2>
-            <p className="text-slate-500 text-sm mt-1">{selectedTask?.group}</p>
-          </div>
-          <div className="p-6 space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-50 p-3 rounded-2xl">
-                <p className="text-[10px] text-slate-400 uppercase font-bold">ช่องทางส่ง</p>
-                <p className="text-sm font-medium">Google Form / LINE</p>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-2xl">
-                <p className="text-[10px] text-slate-400 uppercase font-bold">ผู้รับผิดชอบ</p>
-                <p className="text-sm font-medium">คุณสมาน ใจดี</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">ลิงก์หลักฐาน (Optional)</label>
-                <input 
-                  type="url" 
-                  placeholder="https://..."
-                  className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20"
-                  value={link}
-                  onChange={(e) => setLink(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">หมายเหตุ</label>
-                <textarea 
-                  rows="3"
-                  placeholder="รายละเอียดเพิ่มเติม..."
-                  className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <button 
-              onClick={handleSubmit}
-              disabled={loading}
-              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-blue-500/30 hover:bg-blue-700 disabled:opacity-50 active:scale-[0.98] transition-all"
-            >
-              {loading ? <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" /> : (
-                <>
-                  <Send size={18} />
-                  <span>ยืนยันการส่งรายงาน</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const GroupHome = () => (
-    <div className="p-4 max-w-4xl mx-auto space-y-6 pb-20">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">{currentGroup?.name}</h2>
-          <p className="text-slate-500 text-sm">การจัดการงานวิชาการ</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <button onClick={() => setView('create')} className="flex flex-col items-center justify-center p-6 bg-white border border-slate-200 rounded-3xl hover:border-emerald-300 hover:shadow-sm transition-all group">
-          <div className="p-4 bg-emerald-100 text-emerald-600 rounded-2xl mb-3 group-hover:scale-110 transition-transform">
-            <PlusCircle size={32} />
-          </div>
-          <span className="font-bold text-slate-700">สร้างรายงาน</span>
-        </button>
-        <button onClick={() => setView('monitor')} className="flex flex-col items-center justify-center p-6 bg-white border border-slate-200 rounded-3xl hover:border-blue-300 hover:shadow-sm transition-all group">
-          <div className="p-4 bg-blue-100 text-blue-600 rounded-2xl mb-3 group-hover:scale-110 transition-transform">
-            <Monitor size={32} />
-          </div>
-          <span className="font-bold text-slate-700">ติดตามงาน</span>
-        </button>
-      </div>
-
-      <div className="space-y-4">
-        <h3 className="font-bold text-slate-800">งานส่งส่วนกลาง (Province to Dept)</h3>
-        <div className="bg-white border border-slate-200 rounded-2xl divide-y divide-slate-100 overflow-hidden text-sm">
-          <div className="p-4 flex justify-between items-center">
-            <span>ส่งสรุปผลการดำเนินงานวัคซีนรายไตรมาส</span>
-            <span className="bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full text-[10px] font-bold">WAITING</span>
-          </div>
-          <div className="p-4 flex justify-between items-center">
-            <span>รายงานงบประมาณกลุ่มงานยุทธศาสตร์</span>
-            <span className="bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full text-[10px] font-bold">SENT</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const GroupCreate = () => {
-    const [form, setForm] = useState({
-      title: '',
-      type: 'DISTRICT_REPORT',
-      responsibleName: '',
-      detail: '',
-      channelInfo: '',
-      startPeriod: '202403',
-      dueDateFirst: '',
-      frequency: 'ONE_TIME',
-      endPeriod: '202405',
-    });
-
-    const handleSave = async () => {
-      // Logic for Monthly Repeat
-      let taskCount = 1;
-      if (form.frequency === 'MONTHLY') {
-        const start = parseInt(form.startPeriod);
-        const end = parseInt(form.endPeriod);
-        taskCount = (end - start + 1) * 19; // Simplified math for mock
-      }
-      
-      await apiCall('CREATE_REPORT', { ...form, group: currentGroup?.groupId });
-      alert(`สร้างรายงานสำเร็จ! ระบบได้ทำการสร้าง Tasks ทั้งหมด ${taskCount} รายการล่วงหน้าเรียบร้อยแล้ว`);
-      setView('home');
-    };
-
-    return (
-      <div className="p-4 max-w-2xl mx-auto space-y-6 pb-20">
-        <button onClick={() => setView('home')} className="flex items-center text-slate-500 hover:text-slate-800">
-          <ArrowLeft size={18} className="mr-1" /> ยกเลิก
-        </button>
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5">
-          <h2 className="text-xl font-bold text-slate-800 mb-4 border-b pb-3">สร้างรายการรายงานใหม่</h2>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">ประเภทรายงาน</label>
-              <select 
-                className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500/20"
-                value={form.type}
-                onChange={e => setForm({...form, type: e.target.value})}
-              >
-                <option value="DISTRICT_REPORT">เก็บข้อมูลจากอำเภอ (19 แห่ง)</option>
-                <option value="PROVINCE_TO_DEPT">ส่วนกลางจังหวัดส่งกรม</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">หัวข้อรายงาน *</label>
-              <input 
-                type="text" 
-                className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500/20"
-                placeholder="ระบุหัวข้อรายงาน"
-                value={form.title}
-                onChange={e => setForm({...form, title: e.target.value})}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">ผู้รับผิดชอบ *</label>
-                <input 
-                  type="text" 
-                  className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500/20"
-                  value={form.responsibleName}
-                  onChange={e => setForm({...form, responsibleName: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">ช่องทางส่ง *</label>
-                <input 
-                  type="text" 
-                  className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500/20"
-                  placeholder="LINE/Form/Link"
-                  value={form.channelInfo}
-                  onChange={e => setForm({...form, channelInfo: e.target.value})}
-                />
-              </div>
-            </div>
-
-            <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-emerald-800">การตั้งค่าความถี่ (Repeat)</span>
-                <select 
-                  className="bg-white border border-emerald-200 rounded-lg px-2 py-1 text-xs font-bold"
-                  value={form.frequency}
-                  onChange={e => setForm({...form, frequency: e.target.value})}
-                >
-                  <option value="ONE_TIME">ส่งครั้งเดียว</option>
-                  <option value="MONTHLY">รายเดือน (Repeat)</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">เริ่ม Period</label>
-                  <select className="w-full bg-white border-none rounded-xl text-xs" value={form.startPeriod} onChange={e => setForm({...form, startPeriod: e.target.value})}>
-                    {MOCK_PERIODS.map(p => <option key={p.periodId} value={p.periodId}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">กำหนดส่งครั้งแรก</label>
-                  <input type="date" className="w-full bg-white border-none rounded-xl text-xs" value={form.dueDateFirst} onChange={e => setForm({...form, dueDateFirst: e.target.value})} />
-                </div>
-              </div>
-
-              {form.frequency === 'MONTHLY' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">สิ้นสุดที่ Period</label>
-                  <select className="w-full bg-white border-none rounded-xl text-xs" value={form.endPeriod} onChange={e => setForm({...form, endPeriod: e.target.value})}>
-                    {MOCK_PERIODS.map(p => <option key={p.periodId} value={p.periodId}>{p.name}</option>)}
-                  </select>
-                  <p className="text-[10px] text-emerald-600 mt-2 italic">* ระบบจะคำนวณวันส่งเดียวกันของทุกเดือนให้อัตโนมัติ</p>
-                </div>
-              )}
-            </div>
-
-            <button 
-              onClick={handleSave}
-              disabled={!form.title || loading}
-              className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-emerald-500/30 hover:bg-emerald-700 disabled:opacity-50 active:scale-[0.98] transition-all"
-            >
-              {loading ? <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" /> : (
-                <>
-                  <Save size={18} />
-                  <span>บันทึกและสร้าง Tasks</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const ExecutiveDashboard = () => (
-    <div className="p-4 max-w-6xl mx-auto space-y-6 pb-20">
-      <header className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">ภาพรวมรายงานจังหวัด</h2>
-          <p className="text-slate-500 text-sm">Dashboard สำหรับผู้บริหาร</p>
-        </div>
-        <select 
-          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none ring-2 ring-transparent focus:ring-purple-500/20"
-          value={selectedPeriod}
-          onChange={(e) => setSelectedPeriod(e.target.value)}
-        >
-          {MOCK_PERIODS.map(p => <option key={p.periodId} value={p.periodId}>{p.name}</option>)}
-        </select>
-      </header>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Tasks', value: '114', color: 'bg-slate-100 text-slate-600', icon: ClipboardList },
-          { label: 'Submitted', value: '82', color: 'bg-emerald-100 text-emerald-600', icon: CheckCircle2 },
-          { label: 'Pending', value: '20', color: 'bg-amber-100 text-amber-600', icon: AlertCircle },
-          { label: 'Late', value: '12', color: 'bg-red-100 text-red-600', icon: AlertCircle },
-        ].map((kpi, i) => (
-          <div key={i} className="bg-white p-4 rounded-3xl border border-slate-200">
-            <div className={`w-10 h-10 ${kpi.color} rounded-xl flex items-center justify-center mb-3`}>
-              <kpi.icon size={20} />
-            </div>
-            <div className="text-2xl font-black text-slate-800">{kpi.value}</div>
-            <div className="text-xs text-slate-400 font-medium uppercase tracking-wider">{kpi.label}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Ranking List */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-bold text-slate-800 flex items-center">
-              <BarChart3 size={18} className="mr-2 text-purple-500" />
-              Ranking ความร่วมมือ (อำเภอ)
-            </h3>
-            <span className="text-xs text-slate-400">Top 5</span>
-          </div>
-          <div className="space-y-4">
-            {[
-              { name: 'อำเภอเมือง 01', rate: 100, onTime: 98 },
-              { name: 'อำเภอเมือง 05', rate: 95, onTime: 90 },
-              { name: 'อำเภอเมือง 12', rate: 92, onTime: 85 },
-              { name: 'อำเภอเมือง 19', rate: 88, onTime: 80 },
-              { name: 'อำเภอเมือง 03', rate: 85, onTime: 82 },
-            ].map((item, i) => (
-              <div key={i} className="flex items-center space-x-4">
-                <span className="w-6 h-6 flex items-center justify-center bg-slate-100 text-slate-500 rounded-lg text-[10px] font-bold">{i+1}</span>
-                <div className="flex-1">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-slate-700">{item.name}</span>
-                    <span className="text-slate-400">{item.rate}%</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-purple-500 h-full rounded-full" style={{ width: `${item.rate}%` }}></div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Breakdown by Group */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-          <h3 className="font-bold text-slate-800 mb-6 flex items-center">
-            <Users size={18} className="mr-2 text-blue-500" />
-            สถานะรายกลุ่มงาน
-          </h3>
-          <div className="space-y-4">
-            {MOCK_GROUPS.map((group, i) => (
-              <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl">
-                <span className="text-sm font-medium text-slate-700">{group.name}</span>
-                <div className="flex space-x-2">
-                  <span className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-600 rounded-full font-bold">25/30</span>
-                  <span className="text-[10px] px-2 py-0.5 bg-red-100 text-red-600 rounded-full font-bold">5 LATE</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const GroupMonitor = () => (
-    <div className="p-4 max-w-5xl mx-auto space-y-6">
-      <header className="flex items-center justify-between">
-        <button onClick={() => setView('home')} className="flex items-center text-slate-500 hover:text-slate-800">
-          <ArrowLeft size={18} className="mr-1" /> กลับ
-        </button>
-        <select 
-          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm"
-          value={selectedPeriod}
-          onChange={(e) => setSelectedPeriod(e.target.value)}
-        >
-          {MOCK_PERIODS.map(p => <option key={p.periodId} value={p.periodId}>{p.name}</option>)}
-        </select>
-      </header>
-
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-slate-800">มอนิเตอร์รายงานประจำเดือน</h2>
-        
-        <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-          <div className="p-4 bg-slate-50 border-b border-slate-200">
-            <h3 className="font-bold text-slate-700">รายงานความครอบคลุมวัคซีน</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] font-bold">
-                <tr>
-                  <th className="px-6 py-3">อำเภอ</th>
-                  <th className="px-6 py-3">สถานะ</th>
-                  <th className="px-6 py-3">วันเวลาที่ส่ง</th>
-                  <th className="px-6 py-3">หลักฐาน</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {MOCK_ORGS.filter(o => o.type === 'DISTRICT').map((org, i) => (
-                  <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-slate-700">{org.name}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${i % 3 === 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
-                        {i % 3 === 0 ? 'SUBMITTED' : 'PENDING'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-slate-400 text-xs">{i % 3 === 0 ? '12/03/67 14:20' : '-'}</td>
-                    <td className="px-6 py-4">
-                      {i % 3 === 0 && <ExternalLink size={14} className="text-blue-500 cursor-pointer" />}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // --- Router Logic ---
-
-  const renderContent = () => {
-    if (view === 'landing') return <Landing />;
-    if (view === 'choose-district') return <ChooseDistrict />;
-    if (view === 'choose-group') return <ChooseGroup />;
-    if (view === 'home') {
-      if (role === 'DISTRICT') return <DistrictHome />;
-      if (role === 'GROUP') return <GroupHome />;
-      return <Landing />;
-    }
-    if (view === 'detail') return <TaskDetail />;
-    if (view === 'create') return <GroupCreate />;
-    if (view === 'monitor') return <GroupMonitor />;
-    if (view === 'dashboard') return <ExecutiveDashboard />;
-    return <Landing />;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const success = onVerify(pin);
+    if (success) setPin('');
+    setIsLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-10">
-      {/* Dynamic Header */}
-      {view !== 'landing' && (
-        <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
-          <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-xl">1</div>
-              <span className="font-bold tracking-tight hidden sm:block">REPORT SYSTEM</span>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="flex flex-col items-end mr-2">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{role}</span>
-                <span className="text-xs font-bold text-slate-700">{currentOrg?.name || currentGroup?.name || 'ADMIN PANEL'}</span>
-              </div>
-              <button 
-                onClick={() => { setView('landing'); setRole(null); setCurrentOrg(null); setCurrentGroup(null); }}
-                className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-              >
-                <UserCircle size={24} />
-              </button>
-            </div>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-lg animate-in fade-in">
+      <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl animate-in zoom-in-95">
+        <div className="p-10 border-b border-slate-100 flex justify-between items-center">
+          <div className="flex items-center space-x-4">
+            <div className="p-3 bg-amber-100 text-amber-600 rounded-2xl shadow-lg"><Lock size={24} /></div>
+            <h2 className="text-2xl font-black text-slate-800 tracking-tight uppercase">ยืนยันตัวตน</h2>
           </div>
-        </nav>
-      )}
+          <button onClick={() => { setPin(''); onCancel(); }} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-red-500 transition-colors"><X size={24} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-10 space-y-8">
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3">รหัส PIN</label>
+            <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-3xl font-black text-2xl tracking-widest text-center focus:border-amber-500 outline-none" placeholder="••••" maxLength={4} autoFocus />
+            {error && <p className="text-red-500 text-xs font-bold ml-3 mt-2">{error}</p>}
+          </div>
+          <button type="submit" disabled={isLoading || pin.length < 4} className="w-full py-5 bg-amber-500 text-white rounded-3xl font-black text-lg shadow-xl disabled:opacity-30 transition-all active:scale-95 uppercase">{isLoading ? 'กำลังตรวจสอบ...' : 'ยืนยัน'}</button>
+        </form>
+      </div>
+    </div>
+  );
+};
 
-      {/* Main Content */}
-      <main className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-        {renderContent()}
-      </main>
+// ==================== API STATUS INDICATOR ====================
 
-      {/* Simple Footer Notification Mockup */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <div className="bg-slate-900 text-white px-4 py-2 rounded-full text-xs font-medium shadow-2xl flex items-center space-x-2">
-          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-          <span>Connected to Google Sheets</span>
+const APIStatusBadge = ({ isConnected }) => (
+  <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2 rounded-full shadow-lg ${
+    isConnected ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'
+  }`}>
+    {isConnected ? <Wifi size={16} /> : <WifiOff size={16} />}
+    <span className="text-xs font-bold">
+      {isConnected ? 'API Connected' : 'API Disconnected'}
+    </span>
+  </div>
+);
+
+// ==================== MAIN APP ====================
+
+const App = () => {
+  const [view, setView] = useState('landing');
+  const [role, setRole] = useState(null);
+  const [selectedName, setSelectedName] = useState('');
+  const [tasks, setTasks] = useState(INITIAL_TASKS);
+  const [isPINVerified, setIsPINVerified] = useState(false);
+  const [showPINGate, setShowPINGate] = useState(false);
+  const [pendingView, setPendingView] = useState(null);
+  const [pinError, setPinError] = useState('');
+  
+  // API State
+  const [apiConnected, setApiConnected] = useState(false);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [orgsFromAPI, setOrgsFromAPI] = useState([]);
+  const [groupsFromAPI, setGroupsFromAPI] = useState([]);
+  
+  // Reports State (for both D2P and P2D)
+  const [reports, setReports] = useState([]);
+
+  // Test API connection on mount
+  useEffect(() => {
+    console.log('🚀 Testing API connection...');
+    api.test()
+      .then(result => {
+        if (result.status === 'success') {
+          setApiConnected(true);
+          console.log('✅ API Connected:', result.message);
+        } else {
+          setApiConnected(false);
+          console.error('❌ API Error:', result.message);
+        }
+      })
+      .catch(err => {
+        console.error('❌ API Connection Failed:', err);
+        setApiConnected(false);
+      });
+  }, []);
+
+  // Load data from API
+  const loadDataFromAPI = useCallback(async () => {
+    if (!apiConnected) {
+      console.log('⚠️ API not connected, using mock data');
+      return;
+    }
+
+    setApiLoading(true);
+    try {
+      // Load reports
+      const reportsResult = await api.getReports();
+      if (reportsResult.status === 'success' && reportsResult.data.length > 0) {
+        console.log('📋 Loaded reports from API:', reportsResult.data);
+      }
+
+      // Load orgs
+      const orgsResult = await api.getOrgs();
+      if (orgsResult.status === 'success' && orgsResult.data.length > 0) {
+        console.log('🏛️ Loaded orgs from API:', orgsResult.data);
+        setOrgsFromAPI(orgsResult.data);
+      }
+
+      // Load groups
+      const groupsResult = await api.getGroups();
+      if (groupsResult.status === 'success' && groupsResult.data.length > 0) {
+        console.log('👥 Loaded groups from API:', groupsResult.data);
+        setGroupsFromAPI(groupsResult.data);
+      }
+
+    } catch (error) {
+      console.error('Error loading data from API:', error);
+    } finally {
+      setApiLoading(false);
+    }
+  }, [apiConnected]);
+
+  useEffect(() => {
+    if (apiConnected) {
+      loadDataFromAPI();
+    }
+  }, [apiConnected, loadDataFromAPI]);
+
+  const navigateTo = (targetView) => {
+    if (!canAccessView(role, targetView, isPINVerified)) {
+      if (requiresPIN(targetView) && !isPINVerified) {
+        setPendingView(targetView);
+        setShowPINGate(true);
+        return;
+      }
+      alert('คุณไม่มีสิทธิ์เข้าถึงหน้านี้');
+      return;
+    }
+    setView(targetView);
+  };
+
+  const handlePINVerified = (pin) => {
+    if (pin === PROVINCE_PIN) {
+      setIsPINVerified(true);
+      setPinError('');
+      setShowPINGate(false);
+      if (pendingView) {
+        setView(pendingView);
+        setPendingView(null);
+      }
+      return true;
+    } else {
+      setPinError('รหัส PIN ไม่ถูกต้อง');
+      return false;
+    }
+  };
+
+  const handleLogout = () => {
+    setRole(null);
+    setSelectedName('');
+    setIsPINVerified(false);
+    setView('landing');
+  };
+
+  const handleCopy = (text) => copyToClipboard(text);
+
+  const getSubmissionStatus = (taskId) => {
+    return DISTRICTS.map((name, index) => ({
+      name,
+      status: index % 4 === 0 ? 'รอดำเนินการ' : 'ส่งแล้ว',
+      time: index % 4 === 0 ? '-' : '10:20 น.',
+      docNumber: index % 4 === 0 ? '-' : `สฎ 0019.${index + 2}/ว ${240 + index}`,
+      docDate: '10 ม.ค. 2569',
+      sentToProvinceDate: '11 ม.ค. 2569',
+      needsDoc: tasks.find(t => t.id === taskId)?.channels?.includes("DOC")
+    }));
+  };
+
+  const Landing = () => (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans selection:bg-blue-100">
+      <APIStatusBadge isConnected={apiConnected} />
+      <div className="max-w-5xl w-full space-y-12 text-center">
+        <div className="space-y-4">
+          <div className="inline-block p-5 bg-white rounded-[2.5rem] shadow-2xl border border-slate-100">
+            <CheckCircle2 size={56} className="text-blue-600" />
+          </div>
+          <h1 className="text-6xl font-black text-slate-800 tracking-tighter leading-tight uppercase">1-Click Report</h1>
+          <p className="text-slate-400 font-bold text-xl tracking-tight uppercase">ช่องทางการรายงานของ สพจ.สุราษฎร์ธานี</p>
+          {apiConnected && (
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-full text-sm font-bold">
+              <Wifi size={16} />
+              <span>API เชื่อมต่อสำเร็จ</span>
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col space-y-6 max-w-4xl mx-auto">
+          <button onClick={() => navigateTo('provincial_dashboard')} className="group w-full p-10 bg-slate-900 border-2 border-slate-800 rounded-[3rem] hover:border-indigo-500 transition-all text-left shadow-2xl relative overflow-hidden">
+            <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+              <div className="flex items-center space-x-6">
+                <div className="w-16 h-16 bg-indigo-500/20 text-indigo-400 rounded-3xl flex items-center justify-center group-hover:scale-110 transition-transform"><BarChart3 size={32} /></div>
+                <div>
+                  <h3 className="font-black text-3xl text-white uppercase tracking-tighter">ภาพรวมระดับจังหวัด</h3>
+                  <p className="text-slate-400 text-base mt-1 font-medium italic">ดูภาพรวมสถานะรายงานทั้งหมด</p>
+                </div>
+              </div>
+              <div className="flex items-center text-indigo-400 font-black text-xs uppercase tracking-widest bg-white/5 px-6 py-3 rounded-2xl">ดูรายงาน <ChevronRight size={14} className="ml-1" /></div>
+            </div>
+          </button>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <button onClick={() => { setRole('district'); setView('entry'); }} className="group p-10 bg-white border-2 border-slate-100 rounded-[3rem] hover:border-blue-500 transition-all text-left shadow-sm">
+              <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform"><Building2 size={28} /></div>
+              <h3 className="font-black text-2xl text-slate-800 tracking-tight">หน่วยอำเภอ</h3>
+              <p className="text-slate-400 text-sm mt-2 font-medium italic leading-relaxed">ส่งรายงานระดับพื้นที่</p>
+            </button>
+            <button onClick={() => { setRole('province'); setView('entry'); }} className="group p-10 bg-white border-2 border-slate-100 rounded-[3rem] hover:border-emerald-500 transition-all text-left shadow-sm">
+              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform font-black">P</div>
+              <h3 className="font-black text-2xl text-slate-800 tracking-tight">กลุ่มงานจังหวัด</h3>
+              <p className="text-slate-400 text-sm mt-2 font-medium italic leading-relaxed">จัดการและติดตามงาน</p>
+            </button>
+          </div>
         </div>
       </div>
+    </div>
+  );
+
+  const Entry = () => {
+    const districtOptions = orgsFromAPI.length > 0 
+      ? orgsFromAPI.filter(org => org.orgType === 'DISTRICT').map(org => org.orgName)
+      : DISTRICTS;
+    
+    const groupOptions = groupsFromAPI.length > 0
+      ? groupsFromAPI.map(group => group.groupName)
+      : GROUPS;
+
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <APIStatusBadge isConnected={apiConnected} />
+        <div className="max-w-md w-full bg-white p-10 rounded-[3.5rem] shadow-2xl border border-slate-100 space-y-8">
+          <div className="text-center space-y-3">
+            <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">เลือกหน่วยงาน</h2>
+            <p className="text-slate-400 font-bold text-xs uppercase tracking-widest italic">ระบุต้นสังกัดเพื่อเข้าใช้งาน</p>
+          </div>
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3">สังกัดหน่วยงาน</label>
+            <select className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-3xl font-black text-slate-700 focus:border-blue-500 outline-none cursor-pointer text-lg" value={selectedName} onChange={(e) => setSelectedName(e.target.value)}>
+              <option value="">เลือกจากรายการ...</option>
+              {role === 'district' 
+                ? districtOptions.map(d => <option key={d} value={d}>{d}</option>)
+                : groupOptions.map(g => <option key={g} value={g}>{g}</option>)
+              }
+            </select>
+            {apiConnected && (
+              <p className="text-xs text-emerald-600 font-bold ml-3">
+                ✓ กำลังใช้ข้อมูลจาก API
+              </p>
+            )}
+          </div>
+          <button disabled={!selectedName} onClick={() => navigateTo(role === 'district' ? 'dashboard' : 'group_dashboard')} className="w-full py-5 bg-blue-600 text-white rounded-3xl font-black text-lg shadow-xl disabled:opacity-30 transition-all active:scale-95 uppercase">เริ่มใช้งาน</button>
+          <button onClick={handleLogout} className="w-full text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors text-center">ยกเลิก</button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="selection:bg-blue-100 font-sans">
+      <PINGate isOpen={showPINGate} onVerify={handlePINVerified} onCancel={() => { setShowPINGate(false); setPendingView(null); }} error={pinError} />
+      
+      {view === 'landing' && <Landing />}
+      {view === 'entry' && <Entry />}
+      
+      {/* ✅ Provincial Dashboard */}
+      {view === 'provincial_dashboard' && (
+        <ProvincialDashboard 
+          onBackToHome={() => setView('landing')}
+        />
+      )}
+      
+      {/* ✅ District Dashboard */}
+      {view === 'dashboard' && (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <APIStatusBadge isConnected={apiConnected} />
+          <div className="text-center p-8">
+            <h1 className="text-4xl font-black mb-4 text-slate-800">District Dashboard</h1>
+            <p className="text-slate-500 mb-4">สำหรับ: {selectedName}</p>
+            {apiLoading && <p className="text-blue-600 mb-4">กำลังโหลดข้อมูลจาก API...</p>}
+            <button onClick={handleLogout} className="mt-8 px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold">ออกจากระบบ</button>
+          </div>
+        </div>
+      )}
+      
+      {/* 🎯 ✅ Group Dashboard - ใช้ Component ใหม่ */}
+      {view === 'group_dashboard' && (
+        <GroupDashboard 
+          auth={{ 
+            role, 
+            selectedName, 
+            isPINVerified 
+          }}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {/* ✅ Monitor Page */}
+      {view === 'monitor' && (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <APIStatusBadge isConnected={apiConnected} />
+          <div className="text-center p-8">
+            <h1 className="text-4xl font-black mb-4 text-slate-800">Monitor Page 🔍</h1>
+            <p className="text-slate-500 mb-2">ติดตามสถานะการส่งรายงาน</p>
+            <p className="text-emerald-600 text-sm">Protected by PIN ✓</p>
+            <button onClick={() => setView('group_dashboard')} className="mt-8 px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold">กลับ Group Dashboard</button>
+          </div>
+        </div>
+      )}
+      
+      {/* ✅ Add Report Page */}
+      {view === 'add_report' && (
+        <AddReportPage
+          auth={{ role, selectedName, isPINVerified }}
+          onBack={() => setView('group_dashboard')}
+          onSave={(reportData) => {
+            console.log('💾 New report saved:', reportData);
+            
+            // Add new report to state
+            setReports(prev => [...prev, reportData]);
+            
+            // TODO: Save to API
+            // api.createReport(reportData);
+          }}
+        />
+      )}
+      
+      {/* ✅ Submit Report Page */}
+      {view === 'submit_report' && (
+        <SubmitReportPage
+          auth={{ role, selectedName, isPINVerified }}
+          reports={reports}
+          onBack={() => setView('group_dashboard')}
+          onSubmit={(submissionData) => {
+            console.log('📤 Report submitted:', submissionData);
+            
+            // Update report with submission timestamp
+            setReports(prev => prev.map(report => 
+              report.reportId === submissionData.reportId
+                ? {
+                    ...report,
+                    lastSubmittedAt: submissionData.submittedAt,
+                    lastSubmittedBy: submissionData.submittedBy,
+                    status: submissionData.status
+                  }
+                : report
+            ));
+            
+            // TODO: Send to API
+            // api.submitReport(submissionData);
+          }}
+        />
+      )}
+      
+      {/* ✅ Track Report Page (alias for monitor) */}
+      {view === 'track_report' && (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <APIStatusBadge isConnected={apiConnected} />
+          <div className="text-center p-8">
+            <h1 className="text-4xl font-black mb-4 text-slate-800">ติดตามรายงาน 📊</h1>
+            <p className="text-slate-500 mb-2">ดูสถานะการส่งของทุกอำเภอ</p>
+            <p className="text-emerald-600 text-sm">Protected by PIN ✓</p>
+            <button onClick={() => setView('group_dashboard')} className="mt-8 px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold">กลับ Group Dashboard</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
